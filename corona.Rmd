@@ -1,0 +1,80 @@
+---
+title: "Coronavirus"
+author: "Larry"
+date: "March 25, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_libraries}
+library(fpp2)
+library(MASS)
+library(car)
+library(dplyr)
+library(psych)
+library(hts)
+library(utils)
+library(httr)
+```
+
+```{r load_data_create_features}
+
+GET("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", authenticate(":", ":", type="ntlm"), write_disk(tf <- tempfile(fileext = ".csv")))
+
+#read the Dataset sheet into "R". The dataset will be called "data".
+mydata=read.csv(tf)
+mydata$caserate=mydata$cases/(mydata$popData2018/1000000)     #calculate rates
+mydata$deathrate=mydata$deaths/(mydata$popData2018/1000000)   #calculate rates
+mydata$mortality=mydata$caserate/mydata$deathrate             #mortality for those diagnosed
+mydata$mortality[is.na(mydata$mortality)]=0
+mydata$date=as.Date(paste0(mydata$month,"/",mydata$day,"/", mydata$year), format="%m/%d/%Y")
+```
+
+```{r delete_nonfeatures}
+
+mydata$dateRep=NULL
+mydata$day=NULL
+mydata$month=NULL
+mydata$year=NULL
+mydata$geoId=NULL
+mydata$countryterritoryCode=NULL
+mydata$popData2018=NULL
+
+```
+```{r aggregate_features}
+
+myagg=aggregate(mydata[,-c(3,7)], by=list(mydata$countriesAndTerritories, mydata$date), FUN=mean)
+mynames=as.character(unique(mydata$countriesAndTerritories))
+mydate=as.character(unique(sort(mydata$date)))
+myarray=array(rep(0, length(mynames)*length(mydate)*5), c(length(mynames),length(mydate), 5))
+
+dimnames(myarray)[[1]]=mynames
+dimnames(myarray)[[2]]=mydate
+dimnames(myarray)[[3]]=c("Cases","Deaths", "Cases/Million", "Deaths/Million", "Mortality %" )
+
+for (i in 1:country_select){
+  newagg=filter(myagg, myagg$Group.1==mynames[i])
+  for (j in 1:myrows){
+    for (k in 1:5){
+      myarray[i,j,k]=newagg[j, k+2]
+    }
+  }
+}
+
+```
+
+
+```{r plot_function}
+
+for (i in 1:length(mynames)){
+  print(autoplot(as.ts(myarray[i,,3:4], frequency=1,rownames=mynames[i]), ylab="Per Million Population", xlab="Time Index Starting 12/31/2019", main=mynames[i]))
+}
+```
+
+
+
+
+

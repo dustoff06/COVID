@@ -1,0 +1,269 @@
+---
+title: "COVID19"
+author: "Larry"
+date: "6/21/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Load Libraries
+
+```{r}
+require(tidyverse)
+require(urbnmapr)
+require(usmap)
+require(ggplot2)
+require(ggExtra)
+require(gridExtra)
+require(maptools)
+require(rgdal)
+require(tmaptools)
+require(spdep)
+require(spatialreg)
+require(sf)
+require(tmap)
+require(sp)
+require(spdep)
+require(spData)
+require(raster)
+require(rgdal)
+require(ggtthemes)
+require(tigris)
+require(grid)
+data("us_states")
+data("alaska")
+data("hawaii")
+data("counties")
+
+setwd("C:/Users/lfult/Desktop/COVID19")
+counties<- st_read("cb_2018_us_county_500k.shp")
+
+```
+
+#Read Data and Process
+
+```{r}
+deaths=read.csv("https://usafactsstatic.blob.core.windows.net/public/data/covid-19/covid_deaths_usafacts.csv",
+                header=TRUE)
+deaths$fips = deaths$ï..countyFIPS
+deaths$fips=as.character(deaths$fips)
+deaths$ï..countyFIPS=NULL
+deaths$County.Name=NULL
+deaths$State=NULL
+deaths$stateFIPS=NULL
+
+for (i in 1:nrow(deaths))
+  {
+  if (nchar(deaths$fips[i])==4){
+    deaths$fips[i]=paste0("0", deaths$fips[i])
+  }
+}
+deaths$GEOID=deaths$fips
+deaths$fips=NULL
+deaths$DeathSums=rowSums(deaths[,4:ncol(deaths)-1])
+deaths=deaths[,c(ncol(deaths)-1, ncol(deaths))]
+
+cases=read.csv("https://usafactsstatic.blob.core.windows.net/public/data/covid-19/covid_confirmed_usafacts.csv",
+               header=TRUE)
+cases$fips = cases$ï..countyFIPS
+cases$fips=as.character(cases$fips)
+cases$ï..countyFIPS=NULL
+cases$County.Name=NULL
+cases$State=NULL
+cases$stateFIPS=NULL
+
+for (i in 1:nrow(cases))
+{
+  if (nchar(cases$fips[i])==4){
+    cases$fips[i]=paste0("0", cases$fips[i])
+  }
+}
+cases$GEOID=cases$fips
+cases$fips=NULL
+cases$CaseSums=rowSums(cases[,4:ncol(cases)-1])
+cases=cases[,c(ncol(cases)-1, ncol(cases))]
+
+population=read.csv("https://usafactsstatic.blob.core.windows.net/public/data/covid-19/covid_county_population_usafacts.csv", 
+               header=TRUE)
+population$GEOID=as.character(population$ï..countyFIPS)
+population$ï..countyFIPS=NULL
+population$County.Name=NULL
+population$State=NULL
+for (i in 1:nrow(population))
+{
+  if (nchar(population$GEOID[i])==4){
+    population$GEOID[i]=paste0("0", population$GEOID[i])
+  }
+}
+```
+
+#Merge Data
+
+```{r}
+total=merge(cases,deaths,by="GEOID", type="left" )
+total=merge(population,total, by="GEOID", type="left")
+total$DeathRate=total$DeathSums/(total$population/100000)
+total$CaseRate=total$CaseSums/(total$population/100000)
+
+
+shp <- st_read("cb_2018_us_county_500k.shp")
+shp=merge(shp,total,by="GEOID", how="left")
+```
+
+#Map Data
+
+```{r}
+current_style =tmap_style("col_blind")
+
+plot1=tm_shape(shp, bbox=extent(c(-124.848974, -66.885444, 24.396308,49.384358))) + 
+  tm_fill("DeathRate", 
+          title = "Deaths per 100K", 
+          style="quantile", 
+          palette = "Reds") +
+  tm_borders(alpha = 0.1) +
+  tm_layout(main.title = "Deaths per 100K Population, COVID 19",
+            main.title.size = 1.5 ,legend.title.size = 0.8)
+
+plot2=tm_shape(shp, bbox=extent(c(-124.848974, -66.885444, 24.396308,49.384358))) + 
+  tm_fill("CaseRate", 
+          title = "Cases per 100K", 
+          style="quantile", 
+          palette = "Blues") +
+  tm_borders(alpha = 0.1) +
+  tm_layout(main.title = "Cases Per 100K Population",
+            main.title.size = 1.5 ,legend.title.size = 0.8)
+
+
+
+plot3=tm_shape(shp, bbox=extent(c(-124.848974, -66.885444, 24.396308,49.384358))) + 
+  tm_fill("DeathSums", 
+          title = "Death Counts", 
+          style="quantile", 
+          palette = "Reds") +
+  tm_borders(alpha = 0.1) +
+  tm_layout(main.title = "Deaths by County, COVID 19",
+            main.title.size = 1.5 ,legend.title.size = 0.8)
+
+plot4=tm_shape(shp, bbox=extent(c(-124.848974, -66.885444, 24.396308,49.384358))) + 
+  tm_fill("CaseSums", 
+          title = "Case Counts", 
+          style="quantile", 
+          palette = "Blues") +
+  tm_borders(alpha = 0.1) +
+  tm_layout(main.title = "Reported Cases by County, COVID 19",
+            main.title.size = 1.5 ,legend.title.size = 0.8)
+
+grid.newpage()
+pushViewport(viewport(layout=grid.layout(2,2)))
+print(plot1, vp=viewport(layout.pos.col = 1, layout.pos.row=1))
+print(plot2, vp=viewport(layout.pos.col = 1, layout.pos.row=2))
+print(plot3, vp=viewport(layout.pos.col = 2, layout.pos.row=1))
+print(plot4, vp=viewport(layout.pos.col = 2, layout.pos.row=2))
+
+```
+#Alaska
+
+```{r}
+current_style =tmap_style("col_blind")
+
+plot5=tm_shape(shp, bbox=bb("Alaska")) + 
+  tm_fill("DeathRate", 
+          title = "Deaths per 100K", 
+          style="quantile", 
+          palette = "Reds") +
+  tm_borders(alpha = 0.1) +
+  tm_layout(main.title = "Deaths per 100K",
+            main.title.size = 1.5 ,legend.title.size = 0.8)
+
+plot6=tm_shape(shp, bbox=bb("Alaska")) + 
+  tm_fill("CaseRate", 
+          title = "Cases per 100K", 
+          style="quantile", 
+          palette = "Blues") +
+  tm_borders(alpha = 0.1) +
+  tm_layout(main.title = "Cases per 100K",
+            main.title.size = 1.5 ,legend.title.size = 0.8)
+
+
+plot7=tm_shape(shp, bbox=bb("Alaska")) + 
+  tm_fill("DeathSums", 
+          title = "Death Counts", 
+          style="quantile", 
+          palette = "Reds") +
+  tm_borders(alpha = 0.1) +
+  tm_layout(main.title = "Death Counts",
+            main.title.size = 1.5 ,legend.title.size = 0.8)
+
+plot8=tm_shape(shp, bbox=bb("Alaska")) + 
+  tm_fill("CaseSums", 
+          title = "Case Counts", 
+          style="quantile", 
+          palette = "Blues") +
+  tm_borders(alpha = 0.1) +
+  tm_layout(main.title = "Case Counts",
+            main.title.size = 1.5 ,legend.title.size = 0.8)
+
+grid.newpage()
+pushViewport(viewport(layout=grid.layout(2,2)))
+print(plot5, vp=viewport(layout.pos.col = 1, layout.pos.row=1))
+print(plot6, vp=viewport(layout.pos.col = 1, layout.pos.row=2))
+print(plot7, vp=viewport(layout.pos.col = 2, layout.pos.row=1))
+print(plot8, vp=viewport(layout.pos.col = 2, layout.pos.row=2))
+
+```
+
+#Hawaii
+```{r}
+current_style =tmap_style("col_blind")
+
+plot9=tm_shape(shp, bbox=bb("Hawaii")) + 
+  tm_fill("DeathRate", 
+          title = "Deaths per 100K", 
+          style="quantile", 
+          palette = "Reds") +
+  tm_borders(alpha = 0.1) +
+  tm_layout(main.title = "Deaths per 100K",
+            main.title.size = 1.5 ,legend.title.size = 0.8)
+
+plot10=tm_shape(shp, bbox=bb("Hawaii")) + 
+  tm_fill("CaseRate", 
+          title = "Cases per 100K", 
+          style="quantile", 
+          palette = "Blues") +
+  tm_borders(alpha = 0.1) +
+  tm_layout(main.title = "Cases per 100K",
+            main.title.size = 1.5 ,legend.title.size = 0.8)
+
+
+plot11=tm_shape(shp, bbox=bb("Hawaii")) + 
+  tm_fill("DeathSums", 
+          title = "Death Counts", 
+          style="quantile", 
+          palette = "Reds") +
+  tm_borders(alpha = 0.1) +
+  tm_layout(main.title = "Death Counts",
+            main.title.size = 1.5 ,legend.title.size = 0.8)
+
+plot12=tm_shape(shp, bbox=bb("Hawaii")) + 
+  tm_fill("CaseSums", 
+          title = "Case Counts", 
+          style="quantile", 
+          palette = "Blues") +
+  tm_borders(alpha = 0.1) +
+  tm_layout(main.title = "Case Counts",
+            main.title.size = 1.5 ,legend.title.size = 0.8)
+
+
+grid.newpage()
+pushViewport(viewport(layout=grid.layout(2,2)))
+print(plot9, vp=viewport(layout.pos.col = 1, layout.pos.row=1))
+print(plot10, vp=viewport(layout.pos.col = 1, layout.pos.row=2))
+print(plot11, vp=viewport(layout.pos.col = 2, layout.pos.row=1))
+print(plot12, vp=viewport(layout.pos.col = 2, layout.pos.row=2))
+
+```
+```
+

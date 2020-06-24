@@ -1,0 +1,307 @@
+---
+title: "COVID19"
+author: "Larry"
+date: "6/21/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Load Libraries
+
+```{r}
+require(tidyverse)
+require(urbnmapr)
+require(usmap)
+require(ggplot2)
+require(ggExtra)
+require(gridExtra)
+require(maptools)
+require(rgdal)
+require(tmaptools)
+require(spdep)
+require(spatialreg)
+require(sf)
+require(tmap)
+require(sp)
+require(spdep)
+require(spData)
+require(raster)
+require(rgdal)
+require(ggthemes)
+require(tigris)
+require(grid)
+require(leaflet)
+require(maptools)
+require(RColorBrewer)
+require(rgeos)
+require(elsa)
+
+data("us_states")
+data("alaska")
+data("hawaii")
+data("counties")
+
+setwd("C:/Users/lfult/Desktop/COVID19")
+
+
+
+```
+
+#Read Data and Process
+
+```{r}
+counties2=readOGR("cb_2018_us_county_500k.shp")
+deaths=read.csv("https://usafactsstatic.blob.core.windows.net/public/data/covid-19/covid_deaths_usafacts.csv",
+                header=TRUE)
+deaths$fips = deaths$ï..countyFIPS
+deaths$fips=as.character(deaths$fips)
+deaths$ï..countyFIPS=NULL
+deaths$County.Name=NULL
+deaths$State=NULL
+deaths$stateFIPS=NULL
+
+for (i in 1:nrow(deaths))
+  {
+  if (nchar(deaths$fips[i])==4){
+    deaths$fips[i]=paste0("0", deaths$fips[i])
+  }
+}
+deaths$GEOID=deaths$fips
+deaths$fips=NULL
+deaths$DeathSums=deaths[,c(ncol(deaths)-1)]
+deaths=deaths[,c(ncol(deaths)-1, ncol(deaths))]
+
+cases=read.csv("https://usafactsstatic.blob.core.windows.net/public/data/covid-19/covid_confirmed_usafacts.csv",
+               header=TRUE)
+cases$fips = cases$ï..countyFIPS
+cases$fips=as.character(cases$fips)
+cases$ï..countyFIPS=NULL
+cases$County.Name=NULL
+cases$State=NULL
+cases$stateFIPS=NULL
+
+for (i in 1:nrow(cases))
+{
+  if (nchar(cases$fips[i])==4){
+    cases$fips[i]=paste0("0", cases$fips[i])
+  }
+}
+cases$GEOID=cases$fips
+cases$fips=NULL
+cases$CaseSums=cases[,c(ncol(cases)-1)]
+cases=cases[,c(ncol(cases)-1, ncol(cases))]
+
+population=read.csv("https://usafactsstatic.blob.core.windows.net/public/data/covid-19/covid_county_population_usafacts.csv", 
+               header=TRUE)
+population$GEOID=as.character(population$ï..countyFIPS)
+population$ï..countyFIPS=NULL
+population$County.Name=NULL
+population$State=NULL
+for (i in 1:nrow(population))
+{
+  if (nchar(population$GEOID[i])==4){
+    population$GEOID[i]=paste0("0", population$GEOID[i])
+  }
+}
+
+hospitals=read.csv("hospitaldata.csv")
+hospitals$GEOID = as.character(hospitals$GEOID)
+
+for (i in 1:nrow(hospitals))
+{
+  if (nchar(hospitals$GEOID[i])==4){
+    hospitals$GEOID[i]=paste0("0", hospitals$GEOID[i])
+  }
+}
+
+partypolitics=read.csv("partypolitics.csv")
+partypolitics$GEOID=as.character(partypolitics$ï..GEOID)
+partypolitics$ï..GEOID=NULL
+
+
+for (i in 1:nrow(partypolitics))
+{
+  if (nchar(partypolitics$GEOID[i])==4){
+    partypolitics$GEOID[i]=paste0("0", partypolitics$GEOID[i])
+  }
+}
+```
+
+#Merge Data and Shapes
+
+```{r}
+total=merge(cases,deaths,by="GEOID", type="left" )
+total=merge(population,total, by="GEOID", type="left")
+total=merge(total, hospitals, by="GEOID", type="left")
+total=merge(total,partypolitics, by="GEOID", type="left")
+total$DeathRate=total$DeathSums/(total$population)
+total$CaseRate=total$CaseSums/(total$population)
+total[is.na(total)]=0
+counties2@data=left_join(counties2@data, total, by="GEOID")
+counties2@data$PopDensity=
+  as.numeric(counties2@data$ALAND)/counties2@data$population
+#total[is.na(total)] = 0
+counties2@data[is.na(counties2@data)]=0
+
+shp<- st_read("cb_2018_us_county_500k.shp")
+shp=left_join(shp,total,by="GEOID")
+shp$PopDensity=
+  as.numeric(shp$ALAND)/shp$population
+
+```
+
+
+
+#Test Open Mapping for Shiny App
+```{r}
+
+states <- aggregate(counties2[, "STATEFP"], 
+                    by = list(ID = counties2@data$STATEFP),
+                    FUN = unique, dissolve = T)  
+
+
+qpal<-colorNumeric("inferno", counties2@data$DeathRate) 
+leaflet(counties2) %>%
+  addPolygons(stroke = FALSE, 
+              fillOpacity = 0.5, 
+              smoothFactor = 0.2, 
+              color=~qpal(DeathRate),
+  popup = paste("County: ", counties2@data$NAME, "<br>",
+         "Deaths / Capita: ", round(counties2@data$DeathRate,2), "<br>")) %>%
+addPolylines(data = states, color = "black", opacity = 1, weight = 2)%>%
+ fitBounds(-124.848974, -66.885444, 24.396308,49.384358) %>% 
+ setView(-98.6, 39.83, zoom = 4)%>%
+ addLegend("bottomright", pal = qpal, values = ~DeathRate,
+    title = "Deaths per Capita",
+    #labFormat = labelFormat(prefix = "$"),
+    opacity = 1)%>%
+  addTiles()
+
+```
+
+
+#LM 1, Death Rate
+
+```{r}
+
+fit_1 <- lm(scale(DeathRate)~scale(MDs)+scale(AcuteBeds)+
+              scale(ICUs)+scale(StaffedBeds)+
+              scale(Discharges)+scale(Census)+scale(ALOS)+scale(CMI)+
+              scale(PopDensity)+scale(DemRep)+as.factor(WParty), data=counties2@data)
+summary(fit_1)
+anova(fit_1)
+shp$res_fit1 <- residuals(fit_1)
+shp$fitted_fit1 <- fitted(fit_1)
+shp$sd_breaks <- scale(shp$res_fit1)[,1] 
+summary(shp$sd_breaks)
+
+my_breaks <- c(-14,-3,-2,-1,1,2,3,14)
+
+tm_shape(shp, bbox=tmaptools::bb(xlim=c(-14, -5), ylim=c(2, 9),width=5, ext=5, relative = TRUE)) + 
+  tm_fill("sd_breaks", title = "Residuals", style = "fixed", breaks = my_breaks, 
+          palette = "-RdBu") +
+  tm_borders(alpha = 0.1) +
+  tm_layout(main.title = "Residuals", main.title.size = 0.7 ,
+            legend.position = c("right", "bottom"), legend.title.size = 0.8)
+
+```
+
+#LM 2, Case Rate
+
+```{r}
+
+fit_1 <- lm(scale(CaseRate)~scale(MDs)+scale(AcuteBeds)+
+              scale(ICUs)+scale(StaffedBeds)+
+              scale(Discharges)+scale(Census)+scale(ALOS)+scale(CMI)+
+              scale(PopDensity)+scale(DemRep)+as.factor(WParty), data=counties2@data)
+summary(fit_1)
+anova(fit_1)
+shp$res_fit1 <- residuals(fit_1)
+shp$fitted_fit1 <- fitted(fit_1)
+shp$sd_breaks <- scale(shp$res_fit1)[,1] 
+summary(shp$sd_breaks)
+
+my_breaks <- c(-14,-3,-2,-1,1,2,3,14)
+
+tm_shape(shp, bbox=tmaptools::bb(xlim=c(-14, -5), ylim=c(2, 9),width=5, ext=5, relative = TRUE)) + 
+  tm_fill("sd_breaks", title = "Residuals", style = "fixed", breaks = my_breaks, 
+          palette = "-RdBu") +
+  tm_borders(alpha = 0.1) +
+  tm_layout(main.title = "Residuals", main.title.size = 0.7 ,
+            legend.position = c("right", "bottom"), legend.title.size = 0.8)
+
+```
+#Nearest Distances
+
+```{r}
+list.queen<-poly2nb(counties2, queen=TRUE)
+W<-nb2listw(list.queen, style="W", zero.policy=TRUE)
+
+print(W, zero.policy=TRUE)
+
+```
+
+
+#Tests of Spatial Relationships
+
+```{r}
+w <- poly2nb(shp, row.names=shp$COUNTYFP, queen=TRUE) #neighbors
+wm <- nb2mat(w, style='B', zero.policy=TRUE) #weight matrix
+rwm <- mat2listw(wm, style='W') #convert to list
+lm.morantest(fit_1, rwm, alternative="two.sided", zero.policy=TRUE)
+lm.LMtests(fit_1, rwm, test = c("LMerr","LMlag","RLMerr","RLMlag","SARMA"), zero.policy=TRUE)
+#Moran's I p_value<.05 => spatial correlation
+#All LMDs statistically signifcant...  We'll try a lag model using 2-stage LS to solve for heteroskedasticity.
+```
+
+#Spatial Regression Model-Death Rate
+```{r}
+spdep::set.ZeroPolicyOption(TRUE)
+# lagsarlm is MLE equivalent
+
+list.queen<-poly2nb(counties2, queen=TRUE)
+W<-nb2listw(list.queen, style="W", zero.policy=TRUE)
+
+mylag=stsls(scale(DeathRate)~scale(MDs)+scale(AcuteBeds)+
+              scale(ICUs)+scale(StaffedBeds)+
+              scale(Discharges)+scale(Census)+scale(ALOS)+scale(CMI)+
+              scale(PopDensity)+scale(DemRep)+as.factor(WParty), zero.policy=TRUE, data=counties2@data, W)
+
+summary(mylag)
+#only case mix and location make a difference
+
+counties2@data$res<-resid(mylag) #residual sar
+spplot(counties2,"res",bbox=extent(c(-124.848974, -66.885444,
+                                     24.396308,49.384358)), at=seq(min(counties2@data$res,na.rm=TRUE),max(counties2@data$res,na.rm=TRUE),length=12),col.regions=rev(brewer.pal(11,"RdBu")))
+
+
+counties2@data$res2=mylag$residuals
+moran.mc(counties2@data$res2, W, 5)
+
+mylisa=lisa(counties2, d1=0, d2=2000, statistic="I",zcol="DeathRate")
+plot(mylisa)
+```
+
+
+#Spatial Regression Model-Case per Capita of the County Population
+```{r}
+spdep::set.ZeroPolicyOption(TRUE)
+# lagsarlm is MLE equivalent
+
+
+mylag2=stsls(scale(CaseRate)~scale(MDs)+scale(AcuteBeds)+
+              scale(ICUs)+scale(StaffedBeds)+
+              scale(Discharges)+scale(Census)+scale(ALOS)+scale(CMI)+
+              scale(PopDensity)+scale(DemRep)+as.factor(WParty), zero.policy=TRUE, data=counties2@data, W)
+
+summary(mylag2)
+#only case mix and location make a difference
+
+counties2@data$res2<-resid(mylag2) #residual sar
+spplot(counties2,"res2",bbox=extent(c(-124.848974, -66.885444, 24.396308,49.384358)), at=seq(min(counties2@data$res2,na.rm=TRUE),max(counties2@data$res2,na.rm=TRUE),length=12),col.regions=rev(brewer.pal(11,"RdBu")))
+
+```
+
